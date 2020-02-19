@@ -1,88 +1,213 @@
-import React from 'react'
-import Head from 'next/head'
-import Nav from '../components/nav'
+import React from 'react';
+import Head from 'next/head';
 
-const Home = () => (
-  <div>
-    <Head>
-      <title>Home</title>
-      <link rel="icon" href="/favicon.ico" />
-    </Head>
+import NameForm from '../components/v2/NameForm';
 
-    <Nav />
+const STEPS = {
+  login: 'login',
+  preVote: 'preVote',
+  voting: 'voting',
+  postVote: 'postVote'
+}
 
-    <div className="hero">
-      <h1 className="title">Welcome to Next.js!</h1>
-      <p className="description">
-        To get started, edit <code>pages/index.js</code> and save to reload.
-      </p>
+class Home extends React.PureComponent {
 
-      <div className="row">
-        <a href="https://nextjs.org/docs" className="card">
-          <h3>Documentation &rarr;</h3>
-          <p>Learn more about Next.js in the documentation.</p>
-        </a>
-        <a href="https://nextjs.org/learn" className="card">
-          <h3>Next.js Learn &rarr;</h3>
-          <p>Learn about Next.js by following an interactive tutorial!</p>
-        </a>
-        <a
-          href="https://github.com/zeit/next.js/tree/master/examples"
-          className="card"
-        >
-          <h3>Examples &rarr;</h3>
-          <p>Find other example boilerplates on the Next.js GitHub.</p>
-        </a>
+  ws = null
+
+  state = {
+    currentStep: STEPS.login,
+    username: '',
+    users: { },
+    currentUser: '',
+    recentPartnered: '',
+    timeLeft: 0,
+    votes: {}
+  }
+
+  _handleSubmit = fullName => {
+    if (this.ws) {
+      this.ws.send(JSON.stringify({
+        type: 'login',
+        data: fullName,
+      }));
+      this.setState({ username: fullName });
+    }
+  };
+
+  _handleVote = username => {
+    this.ws.send(JSON.stringify({
+      type: 'vote',
+      data: username
+    }))
+  }
+
+  _sortVotes = votes => {
+    const sortable = [];
+
+    for (const vote in votes) {
+        sortable.push([vote, votes[vote]]);
+    }
+
+    sortable.sort(function(a, b) {
+        return b[1] - a[1];
+    });
+
+    return sortable.filter(item => item[0] !== "partner");
+  };
+
+  _setupWS = () => {
+    const url = new URL('/', window.location.href);
+    url.protocol = url.protocol.replace('http', 'ws');
+    this.ws = new WebSocket(url.href);
+
+    this.ws.addEventListener('message', (message) => {
+      const { type, data } = JSON.parse(message.data);
+      
+      switch (type) {
+        case 'vote-update':
+          console.log(data);
+          this.setState({ currentStep: STEPS.voting, currentUser: data.currentUser, users: data.users, timeLeft: data.timeLeft });
+          break;
+        case 'vote-finalised':
+          this.setState({ currentStep: STEPS.postVote, recentPartnered: `${data.currentUser} and ${data.partner}`, votes: this._sortVotes(data.votes) })
+          break;
+        case 'reset':
+          this.setState({ currentStep: STEPS.login });
+          break;
+        case 'logged-in':
+        default:
+          this.setState({ currentStep: STEPS.preVote });
+      }
+    });
+  }
+
+  renderStep() {
+    const { currentStep, username, currentUser, users, recentPartnered, timeLeft, votes } = this.state;
+
+    switch (currentStep) {
+      case STEPS.voting:
+        return (
+          <div className="voteWrapper">
+            <h2>Who should {currentUser} be paired with?</h2>
+            <div className="buttonWrapper">
+              {Object.keys(users).map(item => (
+                <button
+                  className="voteButton"
+                  onKeyPress={e => { e.preventDefault(); }}
+                  onClick={e => { e.preventDefault(); this._handleVote(item) }}
+                >
+                  <b>{item}</b>
+                  <div>Votes: {users[item]}</div>
+                </button>
+              ))}
+            </div>
+            <h4>Time left: {20 - timeLeft} seconds</h4>
+          </div>
+        );
+      case STEPS.postVote:
+        console.log(votes);
+        return (
+          <div>
+            <h2>A new pair!</h2>
+            <p>{recentPartnered}</p>
+            <h3>Votes:</h3>
+            <ul>
+              {votes.map(item => (
+                <li>{item[0]} - {item[1]}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      case STEPS.preVote:
+        return (
+          <div>Howdy {username}. Voting will start soon!</div>
+        )
+      case STEPS.login:
+      default:
+        return (
+          <div>
+            <h1>FED Connect V1</h1>
+            <NameForm onSubmit={this._handleSubmit} />
+          </div>
+        );
+    }
+  }
+
+  componentDidMount() {
+    this._setupWS();
+  }
+
+  render() {
+    return (
+      <div>
+        <Head>
+          <title>FED Connect</title>
+        </Head>
+        <div className="formWrapper">
+          {this.renderStep()}
+        </div>
+        <style jsx global>{`
+            body {
+                font-family: 'Arial';
+                margin: 0;
+            }
+            
+            h1 {
+              text-align: center;
+              font-size: 50px;
+            }
+
+            .formWrapper {
+              display: flex;
+              min-height: 100vh;
+              align-items: center;
+              justify-content: center;
+            }
+
+            .buttonWrapper {
+              display: flex;
+              flex-wrap: wrap;
+              max-width: 600px;
+              justify-content: center;
+              margin: auto;
+            }
+
+            .voteButton {
+              margin: 10px;
+              flex-basis: calc(33.33% - 20px);
+              padding: 20px;
+              background: white;
+              border: 1px solid #cccccc;
+              border-radius: 4px;
+            }
+
+            .voteButton:hover {
+              cursor: pointer;
+            }
+
+            @media (max-width: 500px) {
+              .voteButton {
+                flex-basis: 100%;
+              }
+            }
+
+            b {
+              font-size: 14px;
+              margin-bottom: 5px;
+              display: block;
+            }
+
+            .voteWrapper {
+              width: 100%;
+            }
+
+            h2, h4, p {
+              text-align: center;
+            }
+        `}</style>
       </div>
-    </div>
+    )
+  }
+}
 
-    <style jsx>{`
-      .hero {
-        width: 100%;
-        color: #333;
-      }
-      .title {
-        margin: 0;
-        width: 100%;
-        padding-top: 80px;
-        line-height: 1.15;
-        font-size: 48px;
-      }
-      .title,
-      .description {
-        text-align: center;
-      }
-      .row {
-        max-width: 880px;
-        margin: 80px auto 40px;
-        display: flex;
-        flex-direction: row;
-        justify-content: space-around;
-      }
-      .card {
-        padding: 18px 18px 24px;
-        width: 220px;
-        text-align: left;
-        text-decoration: none;
-        color: #434343;
-        border: 1px solid #9b9b9b;
-      }
-      .card:hover {
-        border-color: #067df7;
-      }
-      .card h3 {
-        margin: 0;
-        color: #067df7;
-        font-size: 18px;
-      }
-      .card p {
-        margin: 0;
-        padding: 12px 0 0;
-        font-size: 13px;
-        color: #333;
-      }
-    `}</style>
-  </div>
-)
-
-export default Home
+export default Home;
